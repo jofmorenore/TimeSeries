@@ -154,6 +154,8 @@ library(fpp)
 library(fable)
 library(feasts)
 data(elecequip)
+?elecequip
+elecequip
 autoplot(elecequip)
 elecequip_tsibble=as_tsibble(elecequip)
 elecequip_tsibble%>%gg_subseries(value,period=12)
@@ -209,16 +211,19 @@ fit_elecequip_tsibble =elecequip_tsibble%>%
     robust = TRUE),NAIVE(season_adjust)))
 
 fit_elecequip_tsibble%>%fabletools::forecast()%>%autoplot(elecequip_tsibble)+ labs(y=" a",title=" b")  
+
+Pronostico<-fit_elecequip_tsibble%>%fabletools::forecast()  
+Pronostico
 ###Por defecto hace el pronóstico para el doble del ciclo estacional 
 ```
 
 #Suavizamiento Exponencial
-Si no se desea alguna componente, hay que establecer los parámetros en cero.
+Si no se desea alguna componente, hay que establecer los parámetros en FALSE.
 
 ```{r Suavizamiento exponencial}
 library(forecast)
 tsibble_lAirPass=as_tsibble(lAirPass)
-HWAP=stats::HoltWinters(lAirPass,seasonal="additive")
+HWAP=stats::HoltWinters(lAirPass,seasonal="additive") ##Puede establecer beta=F y/0 gamma=F, además el objeto debe ser de clase ts.
 HWAP_1=forecast::hw(lAirPass,seasonal="additive",damped=TRUE)  ###También se puede usar holt
 
 plot(HWAP)
@@ -251,10 +256,312 @@ pronostico%>%autoplot(tsibble_lAirPass)+geom_line(aes(y=.fitted),col="#D55E00",d
 
 la función ets,ses, holt y hw de forecast también permiten hacer suavizamiento exponencial.
 
+```{r dos modelos usando fable}
+modelos<-tsibble_lAirPass%>%
+   model(ets=ETS(value~ error("A")+trend("A")+season("A")),
+         stl=decomposition_model(STL(value ~ trend(window = 13) +
+                   season(window = "periodic"),
+    robust = TRUE),NAIVE(season_adjust)))
+ modelos 
+
+ modelos%>%fabletools::forecast(h=12)%>%
+   autoplot(tsibble_lAirPass)
+```
+
+
+
+## Modeltime para ETS
+
+El flujo de trabajo en modeltime es como sigue:
+* Creación de una tabla con el(los) modelo(s) de modeltime. Es decir crear un tabla con el modelo ajustado usando los datos de entrenamiento.
+* Etapa de calibración. Cuando el modelo ajustado es aplicado a los datos de prueba. Aquí se buscan los mejores hiperparámetros para calibrar el modelo y que nos entregue el modelo con la mejor capaciadad predictiva. Los siguientes dos pasos hacen parte de la etapa de calibración:
+    * Pronóstico sobre los datos de prueba para compararlo con los reales.
+    * Con el modelo "calibrado" sobre el conjunto de entrenamiento procedemos a computar las medidas de precisión del pronóstico.
+    * Nota: Se pueden comparar las medidas de precisión sobre el conjunto de entrenamiento y  con las del conjunto de prueba.
+
+* Una vez escogido el modelo final(con los hiperparámetros o variables regresoras finales), el que posiblemente tenga mejor capacidad predictiva, debemos reajustar el modelo sobre todos los datos(re-estimar los parámetros con todos los datos: los de entrenamineto y de prueba)
+
+* Usar le modelo para hacer los pronósticos del futuro.
+
+
+
+* 
+
+```{r ets modeltime preparacion}
+
+library(dplyr)
+library(parsnip)
+library(rsample)
+library(timetk)
+library(modeltime)
+library(tsibble)
+library(tidymodels)
+###Creación del objeto sibble
+lAirPass_tbl<-as_tibble(as_tsibble(lAirPass))
+lAirPass_tbl$index=as.Date(lAirPass_tbl$index)
+lAirPass_tbl=rename(lAirPass_tbl,Fecha=index,logAirpass=value)
+lAirPass_tbl<-lAirPass_tbl%>%mutate(Airpass=exp(logAirpass))
+
+lAirPass_tbl
+###División en entrenamiento y prueba
+splits_lAirPass_tbl=timetk::time_series_split(lAirPass_tbl,date_var=Fecha,assess = 12,cumulative = TRUE)
+splits_lAirPass_tbl%>% tk_time_series_cv_plan()%>%
+  plot_time_series_cv_plan(Fecha,logAirpass)
+splits_lAirPass_tbl
+
+
+
+```
+El caso que trataremos consiste en la estimación de los parámetros, smooth_level($\alpha$), smooth_trend($\beta$), smooth_seasonal($\gamma$) de un modelo de suavizamineto exponencial.
+```{r ets modeltime}
+
+#Ajuste del modelo suavizamineto exponencial
+?modeltime::exp_smoothing
+ets_logAirpass<-modeltime::exp_smoothing(
+  error="additive",
+  trend="additive",
+  season="additive"
+)%>%
+  set_engine("ets")%>%
+  fit(logAirpass ~ Fecha,data=training(splits_lAirPass_tbl))
+ # Modeltime y creación de una tabla con el objeto ajustado sobre el conjunto de prueba y pronóstico sobre el conjunto de prueba.
+ 
+modeltime_table(ets_logAirpass) %>%
+  modeltime_calibrate(testing(splits_lAirPass_tbl))%>%
+  modeltime_forecast(
+    new_data = testing(splits_lAirPass_tbl),
+    actual_data = lAirPass_tbl
+  )%>%
+  plot_modeltime_forecast(.conf_interval_fill = "lightblue")
+
+
+##Se crea un objeto de pronóstico con los valores sobre el conjunto de prueba.
+pronostico_ets<-modeltime_table(ets_logAirpass) %>%
+  modeltime_calibrate(testing(splits_lAirPass_tbl))%>%
+  modeltime_forecast(
+    new_data = testing(splits_lAirPass_tbl),
+    actual_data = lAirPass_tbl
+  )
+    
+ pronostico_ets 
+ 
+ ####Los mismo que hicimos anteriormente pero ahora creando objetos
+ ## Modeltime
+ model_tbl<-modeltime_table(ets_logAirpass)
+## Calibración 
+  calibration_tbl<-model_tbl%>%
+    modeltime_calibrate(testing(splits_lAirPass_tbl))
+## Pronóstico sobre el conjunto de prueba
+  calibration_tbl%>%
+   modeltime_forecast(
+    new_data = testing(splits_lAirPass_tbl),
+    actual_data = lAirPass_tbl
+  ) 
+ ###Residuales 
+  residuales_ajuste<-model_tbl%>%
+  modeltime_calibrate(new_data=training(splits_lAirPass_tbl))%>%
+  modeltime_residuals()
+
+residuales_ajuste%>%plot_modeltime_residuals(
+  .type="timeplot",
+  .interactive = TRUE)
+  
+### Precisión de los pronósticos
+  calibration_tbl%>%
+    modeltime_accuracy()
+  
+  ## Re-ajuste y predicción de valores futuros
+re_ajuste<-calibration_tbl%>%
+  modeltime_refit(data=lAirPass_tbl)
+
+re_ajuste%>%
+  modeltime_forecast(h=12,
+                     actual_data = lAirPass_tbl
+                     )%>%
+  plot_modeltime_forecast()
+
+
+
+
+```
+
+Podemos establecer(fijar) los valores de los parámetros : smooth_level($\alpha$), smooth_trend($\beta$), smooth_seasonal($\gamma$).
+
+
+```{r ets fijando valores}
+?modeltime::exp_smoothing
+ets_logAirpass_fixed<-modeltime::exp_smoothing(
+  error="additive",
+  trend="additive",
+  season="additive",
+  smooth_level=0.5,
+  smooth_trend=0.02,
+  smooth_seasonal=0.01
+)%>%
+  set_engine("ets")%>%
+  fit(logAirpass ~ Fecha,data=training(splits_lAirPass_tbl))
+
+# modeltime
+modeltime_table(ets_logAirpass_fixed) %>%
+  modeltime_calibrate(testing(splits_lAirPass_tbl))%>%
+  modeltime_forecast(
+    new_data = testing(splits_lAirPass_tbl),
+    actual_data = lAirPass_tbl
+  )%>%
+  plot_modeltime_forecast(.conf_interval_fill = "lightblue")
+
+pronostico_ets 
+ ## Modeltime
+ model_tbl_fixed<-modeltime_table(ets_logAirpass_fixed)
+## Calibración 
+  calibration_tbl_fixed<-model_tbl_fixed%>%
+    modeltime_calibrate(testing(splits_lAirPass_tbl))
+  
+###
+  ## Prueba de pronóstico
+  calibration_tbl_fixed%>%
+   modeltime_forecast(
+    new_data = testing(splits_lAirPass_tbl),
+    actual_data = lAirPass_tbl
+  ) 
+  ### Precisión de los pronósticos
+  calibration_tbl_fixed%>%
+    modeltime_accuracy()
+```
+
 
 Tarea: Del libro electrónico fpp3 por favor complementar el tema de descomposición y suavizamiento exponencial con la lectura de todas las secciones:
 https://otexts.com/fpp3/decomposition.html
 
 https://otexts.com/fpp3/expsmooth.html
+
+```{r Series irregularmente espaciadas}
+library(readxl)
+Colcap<- read_excel("Datos históricos COLCAP-3.xlsx")
+Colcap
+
+splits_Colcap_tbl=timetk::time_series_split(Colcap,date_var=Fecha,assess = 15,cumulative = TRUE)
+splits_Colcap_tbl%>% tk_time_series_cv_plan()%>%
+  plot_time_series_cv_plan(Fecha,Ultimo)
+
+ets_Colcap<-modeltime::exp_smoothing(
+  error="additive",
+  trend="additive",
+  season="none"
+)%>%
+  set_engine("ets")%>%
+  fit(Ultimo ~ Fecha,data=training(splits_Colcap_tbl))
+ # Modeltime ----
+ 
+modeltime_table(ets_Colcap) %>%
+  modeltime_calibrate(testing(splits_Colcap_tbl))%>%
+  modeltime_forecast(
+    new_data = testing(splits_Colcap_tbl),
+    actual_data = Colcap
+  )%>%
+  plot_modeltime_forecast(.conf_interval_fill = "lightblue")
+
+
+```
+
+# Evaluación de los pronósticos
+Antes de hablar de la evaluación de los pronósticos, hablaremos que hay dos tiempos de pronósticos, como los define Hydman en el libro fpp3:
+* Los pronósticos ex-ante son aquellos que se realizan utilizando únicamente la información que está disponible de antemano. Estos son pronósticos genuinos, hechos con anticipación utilizando cualquier información disponible en ese momento.
+
+* Las previsiones ex-post son aquellas que se realizan utilizando información posterior sobre los predictores. Estos no son pronósticos genuinos, pero son útiles para estudiar el comportamiento de los modelos de pronóstico.
+
+El Rolling es un método que permite computar medidas de precisión de los pronósticos. La idea es basada en validación cruzada para series de tiempo, en donde el origen de pronóstico va rodando.
+Ver ejemplo en https://otexts.com/fpp3/tscv.html.
+
+## Medidas de Presición.
+La medida mas usada es el error cuadrático medio de predicción $h-$pasos adelante, es decir, 
+$$ECM[\hat{X}_{T+h|T}]=E[(X_{T+h}-\hat{X}_{T+h|T})^2]=E[e^{2}_{T+h|T}],$$
+donde $X_{T+h}-\hat{X}_{T+h|T}=e_{T+h|T}$ es el error de predicción $h-$pasos adelante y el cual estima mediante $\frac{1}{T-l-h+1}\sum_{t=1}^{t-h+1}e^{2}_{t,h}$. También existen mas medidas de precisión, por ejemplo el error medio absoluto el cual se define como:
+
+$$\frac{1}{T-l-h+1}\sum_{t=1}^{l-h+1}|e_{t,h}|.$$
+
+Vamos a crear el procedimiento de rolling de forma manual.
+```{r Rolling 1}
+h=3
+lAirPass
+
+#HWAP=stats::HoltWinters(lAirPass,seasonal="additive")
+lserie=length(lAirPass)
+ntrain=trunc(length(lAirPass)*0.85)
+ntrain
+time(lAirPass)
+time(lAirPass)[ntrain]###Me entrega la ultima fecha de la posición ntrain
+train=window(lAirPass,end=time(lAirPass)[ntrain])
+test=window(lAirPass,start=time(lAirPass)[ntrain]+1/12)##1/12 porque es la fracción que corresponde a un mes
+length(train)
+ntest=length(test)
+ntest
+lserie ### Comparar los valores
+fchstepahe=matrix(0,nrow=ntest,ncol=h)
+verval=cbind(test[1:ntest])
+for(j in 2:h){
+  verval=cbind(verval,c(test[j:ntest],rep(NA,j-1)))
+}
+verval=cbind(test[1:ntest],c(test[2:ntest],NA),c(test[3:ntest],NA,NA))
+####Ajuste del modelo con los datos de entrenamiento
+HWAP_train=stats::HoltWinters(train,seasonal="additive")
+HWAP_train$alpha
+HWAP_train$beta
+HWAP_train$gamma
+for(i in 1:(ntest))
+{
+  x=window(lAirPass,end=time(lAirPass)[ntrain]+(i-1)/12)
+  print(length(x))
+  refit=stats::HoltWinters(x,seasonal="additive",alpha=HWAP_train$alpha,beta=HWAP_train$beta,gamma=HWAP_train$gamma)
+    fchstepahe[i,]=as.numeric(forecast::forecast(refit,h=h)$mean)
+}
+fchstepahe
+errores_pred=verval -fchstepahe
+ECM=apply(errores_pred^2,MARGIN = 2,mean,na.rm=TRUE)
+RECM=sqrt(ECM)
+RECM
+```
+
+### Rolling
+Se puede consultar mas detalles en  https://www.openforecast.org/adam/rollingOrigin.html#fig:ROProcessAnimation y https://cran.r-project.org/web/packages/greybox/index.html.
+
+Haremos rolling unsando la función "ro()"  programada en R del paquete greybox.
+```{r rolling 2}
+library(forecast)
+library(greybox)
+HWAP_train=stats::HoltWinters(train,seasonal="additive")
+?ro
+
+h=3
+ourCallETS <- "forecast::forecast(stats::HoltWinters(train,alpha=HWAP_train$alpha,beta=HWAP_train$beta,gamma=HWAP_train$gamma),h=h,level=95)"
+ourValueETS <- c("mean","lower","upper")
+origins=22   ##número de rolling windows
+Valoresretornados1 <- ro(lAirPass, h=h, origins=origins, call=ourCallETS, value=ourValueETS,ci=FALSE,co=FALSE)
+Valoresretornados1$holdout## Permiten verificar los verdaderos valores h-pasos adelante. 
+sqrt(apply((Valoresretornados1$holdout -Valoresretornados1$mean)^2,1,mean,na.rm=TRUE)) ### Se calcula la raíz del error cudrático medio de predicción
+
+apply(abs(Valoresretornados1$holdout - -Valoresretornados1$mean),1,mean,na.rm=TRUE) / mean(Valoresretornados1$actuals) ### Error medio absoluto escalado
+```
+
+
+```{r rolling 3}
+library(forecast)
+library(greybox)
+salida_ets_train_lAirpass<-ets(train,model="AAA")
+salida_ets_train_lAirpass$par
+?ro
+h=3
+ourCallETS <- "forecast::forecast(forecast::ets(data,alpha=salida_ets_train_lAirpass$par[1],beta=salida_ets_train_lAirpass$par[2]),gamma=salida_ets_train_lAirpass$par[3],h=h,level=95)"
+ourValueETS <- c("mean","lower","upper")
+origins=22
+Valoresretornados1 <- ro(lAirPass, h=h, origins=origins, call=ourCallETS, value=ourValueETS,ci=FALSE,co=FALSE)
+
+apply(sqrt((Valoresretornados1$holdout -Valoresretornados1$mean)^2),1,mean,na.rm=TRUE) ### Se calcula la raíz del error cuadrático medio de predicción
+
+apply(abs(Valoresretornados1$holdout - -Valoresretornados1$mean),1,mean,na.rm=TRUE) / mean(Valoresretornados1$actuals) ### Error medio absoluto escalado
+```
+
+
+
 
 

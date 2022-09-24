@@ -3,6 +3,7 @@ title: "Analisis Descriptivo de Series de Tiempo en R"
 output: github_document
 #output: html_document
 always_allow_html: true
+bibliography:bibliodescriptiva.bib
 ---
 
 ```{r setup, include=FALSE}
@@ -16,6 +17,7 @@ Vamos a analizar de forma descriptiva algunas serie de tiempo. Empezaremos por l
 library(TSstudio)
 data(USUnRate)
 ts_info(USUnRate)
+class(USUnRate)
 plot(USUnRate,main = "US Monthly Unemployment Rate",ylab="Unemployment Rate (%)")
 ```
 La serie es medida mensual, es decir, presenta una frecuencia de 12.
@@ -290,31 +292,39 @@ Vamos a correr lo mismo pero en Python para la transformación de BoxCox
 ```{r configuración, include=FALSE}
 library(knitr) 
 library(reticulate)
-use_condaenv(condaenv = "Ambiente38", conda = "auto", required = TRUE)
-#pandas=import("pandas")
-knitr::knit_engines$set(python = reticulate::eng_python) 
+###Nos ubicamos en el ambiente dentro de la terminal y damos which python y copiamos la ruta "/opt/anaconda3/envs/Python38andR/bin/python"
+##"/Users/macbook/opt/anaconda3/envs/Ambiente38/bin/python"
+##"/Users/macbook/Library/r-miniconda/bin/python"
+use_python("/Users/macbook/opt/anaconda3/envs/Ambiente38/bin/python")
+#use_virtualenv("~/Python38andR")
+py_config()
+pd <- import("pandas")
+arreglo<-pd$array(c(1, 2, 3))
+print(arreglo)
+arreglo$shape
+
 ```
 
 
 
-#```{python inicio}
-#import sys
-#print(sys.path)
-#import pandas as pd
-#import matplotlib.pylab as plt
-#data = pd.read_csv('AirPassengers.csv')
-#print(data)
-#print('\n Data Types:')
-#print(data.dtypes)
-#con=data['Month']
-#data['Month']=pd.to_datetime(data['Month'])
-#data.set_index('Month', inplace=True)
-#pasajeros=data.set_index('Month')
+```{python inicio}
+import sys
+print(sys.path)
+import pandas as pd
+import matplotlib.pylab as plt
+data = pd.read_csv('AirPassengers.csv')
+print(data)
+print('\n Data Types:')
+print(data.dtypes)
+con=data['Month']
+data['Month']=pd.to_datetime(data['Month'])
+data
+pasajeros=data.set_index('Month')
 #check datatype of index
 
 #convert to time series:
-#ts = pasajeros['NPassengers']
-#ts.head(10)
+ts = pasajeros['NPassengers']
+ts.head(10)
 
 ####Graficar la Serie#####
 #plt.plot(ts)
@@ -324,31 +334,20 @@ knitr::knit_engines$set(python = reticulate::eng_python)
 
 
 
-#```
+```
 
-#```{python inicio_1}
-#ts.index.freq
-#pasajeros.index.freq='MS'
-#ts.index.freq='MS'
-#ts.index
+```{python inicio_1}
+print(r.AirPassengers)
+print(r.lAirPass)
+```
 
-#####Transformación Box-Cox
-#import scipy as sp
-#import scipy.stats ####En ocasiones puede funcionar la línea 46 sin ésta línea.
-#print(sp.stats.boxcox(ts,alpha=0.05))
-#sp.stats.boxcox(data['NPassengers'],alpha=0.05)
-#logAirp=sp.stats.boxcox(data['NPassengers'],lmbda=0)
-#data = data.assign(logAirp=logAirp)   
+```{r uso de objeto creado en python}
 
-#logpasajeros=data.set_index('Month')   
-#logAirPass=  logpasajeros['logAirp'] 
-#plt.plot(logAirPass)
-#plt.show()
-#sp.stats.boxcox(logAirp,alpha=0.05)
-###Note que la transformación Box-Cox si surtió efecto.
-#quit
+py$data
+library(ggplot2)
+ggplot2::ggplot(data = py$data,aes(x=Month,y=NPassengers) )+geom_line()
 
-#```
+```
 
 ## Gráficas de Retardos
 Vamos a hacer gráficos de dispersión para chequear que tipos de relaciones hay entre los retardos de la variable interés. Vamos a trabajar con algunas series, por ejemplo:
@@ -389,7 +388,7 @@ ts_lags(soi,lags=1:12)
 
 ```
 
-## La función de autocorrelación simple o gráfico ACF
+## La función de autocorrelación simple o gráfico ACF y PACF
 
 Cuando el proceso es estacionario, o al menos no presenta tendencia, podemos usar el gráfico acf para explorar las posibles relaciones lineales a diferentes rezagos. En seguida mostramos la función de autocorrelación para el índice soi y la serie de nuevos peces. 
 
@@ -403,7 +402,7 @@ acf(rec, 48, main="Recruitment")
 ```
 
 ```{r ccf}
-ccf(soi, rec, 48, main="SOI vs Recruitment", ylab="CCF")
+ccf(rec, soi, 48, main="SOI vs Recruitment", ylab="CCF")
 #Corr(rec_{t},soi_{t-h})
 #Corr(soi_{t},rec_{t-h},)
 ```
@@ -427,29 +426,37 @@ En ambas gráficas  podemos ver que se muestran periodicidades en las correlacio
 Del los libros H. Kantz and T. Schreiber: Nonlinear Time series Analysis (Cambridge university press) H. Abarbanel: Analysis of observed chaotic data (Springer, 1996) y 
 NONLINEAR TIME SERIES ANALYSIS HOLGER KANTZ AND THOMAS SCHREIBER. Cambrige University Press 2003.
 
-Ahora utilizaremos los paquetes nonlinearTseries y tseriesChaos para computar el average mutual information(AMI) o La información mutua promedio (AMI, la cual mide cuánto nos dice una variable aleatoria sobre otra. En el contexto del análisis de series de tiempo, AMI ayuda a cuantificar la cantidad de conocimiento obtenido sobre el valor de $x(t+\tau)$ al observar $x(t)$.
+
+Ahora utilizaremos los paquetes nonlinearTseries y tseriesChaos para computar el average mutual information(AMI) o La información mutua promedio (AMI, la cual mide cuánto nos dice una variable aleatoria sobre otra, el cual se define como: 
+
+$$I(X;Y)=\sum_{i}\sum_{j}p(x_i,y_j)\log_2(\frac{p(x_i,y_j)}{p(x_i)p(y_j)}).$$
+En el contexto del análisis de series de tiempo, AMI ayuda a cuantificar la cantidad de conocimiento obtenido sobre el valor de $X_{t+d}$ al observar $X_t$. Equivalentemente, el AMI es una medida de qué tanto el conocimiento de $X$ reduce la incertidumbre acerca de $Y$. Esto implica que $I(X,Y)=0$ si y sólo si $X$ y $Y$ son variables aletorias independientes. I(X; Y ) describe la información que la medición $X_t$ en el tiempo $t$ aporta a la medición $X_{t+d}$ en el tiempo $t + d$. Si se elige d como el valor alrededor del primer mínimo del AMI, entonces $Y{t}$ e $y_{t+d}$ son parcialmente pero no totalmente independientes.
+
+
+
 
 Vamos a simular una serie de la forma
-$$x_t=\frac{x_t-1}{x_{t-1}^2+1}+\epsilon_t$$ y a trabajar con la serie de linces Candienses del paquete astsa lynx.
+$$x_t=\frac{x_t-1}{x_{t-12}^2+1}+\epsilon_t$$ y a trabajar con la serie de linces Candienses del paquete astsa lynx.
 
 ```{r AMI}
 library(nonlinearTseries)
 library(tseriesChaos)
 et=rnorm(1100,0,1)
 xt=rep(0,1100)
-for(t in 2:1100)
+for(t in 13:1100)
   {
-  xt[t]=(xt[t-1]-1)/(xt[t-1]^2+1)+et[t]
+  xt[t]=(xt[t-1]-1)/(xt[t-12]^2+1)+et[t]
   }
 xtsimul=as.ts(xt[101:1100])
 length(xtsimul)
 plot(xtsimul)
 acf(xtsimul)
 par(mar = c(3,2,3,2))
-astsa::lag1.plot(xtsimul, 6) 
-nonlinearTseries::mutualInformation(xtsimul,lag.max = 10,n.partitions = 50,units = "Nats",do.plot = TRUE) #c("Nats", "Bits", "Bans")
+astsa::lag1.plot(xtsimul, 12,corr = F) 
+nonlinearTseries::mutualInformation(xtsimul,lag.max = 100,n.partitions = 50,units = "Bits",do.plot = TRUE) #c("Nats", "Bits", "Bans")
+pacf(xtsimul)
 
-tseriesChaos::mutual(xtsimul, partitions = 50, lag.max = 10, plot=TRUE)
+tseriesChaos::mutual(xtsimul, partitions = 50, lag.max = 100, plot=TRUE)
 
 ```
 ```{r mas sobre nolinealidad lynx}
@@ -682,8 +689,13 @@ Otro enfoque para analizar patrones estacionales en datos de series de tiempo es
 ```{r explorando estacionalidades con timetk}
 require(timetk)
 UKgrid_tbl
-UKgrid_tbl%>%plot_seasonal_diagnostics(.date_var = TIMESTAMP,.value = ND,.feature_set = c("hour","wday.lbl","month.lbl"))
+UKgrid_tbl%>%plot_seasonal_diagnostics(.date_var = TIMESTAMP,.value = ND,.feature_set = c("hour","week","wday.lbl","month.lbl"),.geom="boxplot") ##Chequear si se desea un diagrama de caja o violín .geom 
 
+UKgrid_tbl%>%mutate(diff_ND=ND-lag(ND))%>%plot_seasonal_diagnostics(.date_var = TIMESTAMP,.value = diff_ND,.feature_set = c("hour"),.geom="violin")
+
+UKgrid_tbl%>%mutate(diff_ND=ND-lag(ND))%>%plot_seasonal_diagnostics(.date_var = TIMESTAMP,.value = diff_ND,.feature_set = c("wday.lbl"),.geom="violin")
+
+UKgrid_tbl%>%mutate(diff_ND=ND-lag(ND))%>%plot_seasonal_diagnostics(.date_var = TIMESTAMP,.value = diff_ND,.feature_set = c("month.lbl"),.geom="violin")
 
 ```
 
@@ -821,7 +833,7 @@ Note que los valores verdaderos de $\beta_1=$ y $\beta_2=$
 beta1teor=2*cos(.6*pi)
 beta2teor=-2*sin(.6*pi)
 set.seed(90210) # fijamos una semilla para que nos dé el mismo resultado
-x = 2*cos(2*pi*1:500/10 + .6*pi) + rnorm(500,0,5)
+x = 2*cos(2*pi*1:500/50 + .6*pi) + rnorm(500,0,5)
 z1 = cos(2*pi*1:500/50)
 z2 = sin(2*pi*1:500/50)
 summary(fit <- lm(x~0+z1+z2)) # sin intercepto.
@@ -855,7 +867,7 @@ Así, $1/T\leq f_j\leq 1/2$, y el valor máximo sería $f_j=0.5$ y se conoce com
 $$Z_t=\mu+\sum_{j=1}^{T/2}A_j\sin(\omega_j t)+ \sum_{j=1}^{T/2}B_j\cos(\omega_j t)+a_t.$$
 
 Note que éste modelo tiene tantos parámetros como observaciones, con lo cual hay que buscar un procedimiento para seleccionar las frecuencias que deben ser incluidas para explicar la evolución de la serie. Para esto se utilizará la herramienta conocida como el periodograma. Se puede verificar que la contribución de una onda a la varianza es dada por $\frac{\hat{R}^2}{2}$, así que ondas asociadas con amplitudes grandes serán importantes en la explicación de la variabilidad de la serie, mientras que ondas asociadas con amplitudes bajas serán poco importantes. De forma análoga a como se mostró en la sección anterior, los estimadores de los coeficientes $A_j$ y $B_j$ están dados por
-$$\hat{A}_j=\frac{2}{T}\sum_{t=1}^{T}Z_t\sen(\omega_j t)$$  
+$$\hat{A}_j=\frac{2}{T}\sum_{t=1}^{T}Z_t\sin(\omega_j t)$$  
 $$\hat{B}_j=\frac{2}{T}\sum_{t=1}^{T}Z_t\cos(\omega_j t)$$
 y $$\hat{R}_j=\hat{A}_j^2+\hat{B}_j^2,$$
 donde $\omega_j=2\pi f_j$ y $f=\frac{j}{T}$, con lo cual
@@ -881,7 +893,7 @@ Vamos a retomar el ejemplo anterior donde simulamos una serie de tamaño $T=500$
 ```{r Periodograma_1}
 plot.ts(x)
 spectrum(x,log='no')
-abline(v=1/10, lty=2,col="red")
+abline(v=1/50, lty=2,col="red")
 ###Otra forma de computarlo es vía la transformada de Fourier
 
 Px = Mod(fft(x))^2
@@ -973,6 +985,15 @@ Note que la primera frecuencia mas alta se encuentra en $\omega=1\cdot \frac{1}{
 
 <b> Tarea</b> : Hacer lo mismo pero ahora usar la serie de pasajeros diferenciada, al igual que la serie UKgrid, mas específicamente la serie UKgrid_xts y la serie taylor del paquete forecast.
 
+# Componente Estacional Estocástica
+La componente estacional $S_t^{(s)}$ puede ser estocástica y no determinística. Consideremos el primer caso, donde la evolución es estacionaria, es decir los estacionales no son constante, pero siguen un proceso estacionario, oscilando alrededor de un valor medio de acuerdo con la representación propuesta en [@Pena2010]:
+$$S_t^{(s)}=\mu^{(s)}+\nu_t$$
+donde $\nu_t$ es un proceso estacionario de media cero y $\mu^{(s)}$ es una constante que depende del mes o de las componentes de los $s$ periodos.
+
+Otra forma de introducir la estacionalidad de forma estocástica es permitir que sea cambiante en el tiempo sin ningún valor fijo medio. En este caso la estacionalidad puede proponerse que siga un porceso no estacionario por ejemplo que siga una caminata aleatoria:
+$$S_t^{(s)}=S_{t-s}^{(s)}+\nu_t$$
+siendo $\nu_t$ es un proceso estacionario de media cero.
+
 ```{r simular SARIMA con componente estacional no-estacionario}
 library(sarima) 
 x <- ts(sarima::sim_sarima(n=144, model = list(siorder=1,
@@ -985,9 +1006,9 @@ spectrum(x,log='no',span=5)
 astsa::mvspec(x, log="no")
 ```
 
-```{r simular SARIMA sin componente estacional}
+```{r simular SARIMA con componente estacional estacionaria}
 library(sarima) 
-x <- ts(sim_sarima(n=288,model=list(sar=0.3, nseasons=12, sigma2 = 1)), frequency = 12 )#SAR(1)
+x <- ts(sim_sarima(n=288,model=list(sar=0.8, nseasons=12, sigma2 = 1)), frequency = 12 )#SAR(1)
 plot(x)
 acf(x)
 monthplot(x)
@@ -999,6 +1020,14 @@ raices
 conj_raices=Conj(raices)
 raices[12]*conj_raices[12]
 ```
+## Desestacionalizar o eliminación de la componente estacional.
+Al igual como se hizo con la tendencia, hay al menos dos forma de eliminar la componente estacional:
+* Estimando la componente estacional y luego proceder quitarla.
+* Usando diferencias estacionales $(1-B^s)^D$, donde $s$ es el periodo del ciclo estacional.
+
+De las series con estacionalidad, usar el operador diferencia estacional y proceder a eliminar la componente estacional.De las series con estacionalidad, usar el operador diferencia estacional y proceder a eliminar la componente estacional usando la función diff(series,lag=s,differences=D).
+
+
 
 
 # Suavizamiento en el contexto de Series de Tiempo
